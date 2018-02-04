@@ -21,13 +21,13 @@
 
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include "DHTesp.h"
+#include "DHT.h"
 
 #include  "local/local_params.h"
 
 // ---- Development Mode ----
 
-#define debugging 1
+#define debugging 0
 
 #if debugging
   #define init_debug() { Serial.begin(9600);  }
@@ -39,14 +39,16 @@
   #define debugln(msg)
 #endif
 
+#define LED   16
+
 // ---- DHT 22 sensor ----
 
-#define SENSOR 0
+#define SENSOR 1
 
 #if SENSOR
-  #define DHTPIN 2
+  #define DHTPIN 5
 
-  DHTesp dht;
+  DHT dht(DHTPIN, DHT22);
 #endif
 
 // ---- MQTT Server Parameters ----
@@ -61,53 +63,73 @@
 WiFiClient   wifi_client;
 PubSubClient mqtt(wifi_client);
 
-// ---- setup() ----
+// ==== setup() ====
 
 void setup() 
 {
   delay(200);
 
-  #if SENSOR
-    dht.setup(DHTPIN, DHTesp::DHT22);
-  #endif
+  pinMode(LED, OUTPUT);
+  digitalWrite(LED, HIGH);
 
   init_debug();
-  delay(10);
+  delay(4000);
 }
 
-// ---- loop() ----
+// ==== loop() ====
 
 void loop() 
 {
+  float humidity;
+  float temperature;
+
   // Ensure that MQTT is still connected
 
   MQTT_connect();
 
   #if SENSOR
+    
     // Grab the current state of the sensor
     
-    delay(dht.getMinimumSamplingPeriod());
-    
-    float humidity_data    = dht.getHumidity();
-    float temperature_data = dht.getTemperature();
+    humidity    = dht.readHumidity();
+    temperature = dht.readTemperature();
   #else
-    float humidity_data    = 30.0;
-    float temperature_data = 21.0;  
+    humidity    = 30.0;
+    temperature = 21.0;  
   #endif
-    
-  debug(F("T:"));  debug(temperature_data);  
-  debug(F(" H:")); debugln(humidity_data);
+
+
+  if (isnan(humidity) || isnan(temperature)) {
+    debugln(F("Failed to read from DHT sensor!"));
+    blink(4);
+    return;
+  }
+
+  debug(F("T:"));  debug  (temperature);  
+  debug(F(" H:")); debugln(humidity);
 
   // Publish data
 
-  MQTT_publish(TEMPERATURE_FEED, temperature_data);
-  MQTT_publish(HUMIDITY_FEED,    humidity_data);
+  MQTT_publish(TEMPERATURE_FEED, temperature);
+  MQTT_publish(HUMIDITY_FEED,    humidity);
 
   // Repeat every 15 minutes
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 90; i++) {
     delay(10000UL);
     //mqtt.loop();
+  }
+}
+
+// ---- blink() ----
+
+void blink(int count)
+{
+  while (count--) {
+    digitalWrite(LED, LOW);
+    delay(500);
+    digitalWrite(LED, HIGH);
+    delay(500);
   }
 }
 
@@ -119,10 +141,10 @@ void WIFI_connect()
   
   // Connect to WiFi access point.
   
-  debug(F("Connecting to "));
+  debug  (F("Connecting to "));
   debugln(WLAN_SSID);
 
-  debug(F("MAC Address: "));
+  debug  (F("MAC Address: "));
   debugln(WiFi.macAddress());
 
   do {
@@ -146,7 +168,7 @@ void WIFI_connect()
   
   debugln(F("WiFi connected"));
   
-  debug(F("IP address: "  ));
+  debug  (F("IP address: "));
   debugln(WiFi.localIP());  
 }
 
@@ -180,7 +202,7 @@ void MQTT_connect()
   
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   
-  debug(F("Trying to connect to MQTT Server with ID: "));
+  debug  (F("Trying to connect to MQTT Server with ID: "));
   debugln(MQTT_ID);
   
   while (!mqtt.connect(MQTT_ID)) { // connect will return 1 for connected
